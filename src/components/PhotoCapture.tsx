@@ -10,6 +10,8 @@ import { getSearchFields } from '@/src/lib/searchUtils';
 import { useAuth } from '@/src/context/AuthContext';
 import { PlateRecognitionResult, PlateRecognitionUiStatus } from '@/src/types';
 import { preprocessImageForRecognition, callRecognizeVehiclePlate } from '@/src/lib/plateRecognition';
+import { getBrowserCompatibilityInfo } from '@/src/lib/browserCompatibility';
+
 
 
 interface BgUploadItem {
@@ -34,6 +36,16 @@ export default function PhotoCapture() {
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const nativeCameraInputRef = useRef<HTMLInputElement>(null);
+
+  const [browserWarnings, setBrowserWarnings] = useState<string[]>([]);
+
+  useEffect(() => {
+    const info = getBrowserCompatibilityInfo();
+    if (info.warnings && info.warnings.length > 0) {
+      setBrowserWarnings(info.warnings);
+    }
+  }, []);
+
 
   // Dynamic active departments list
   const [activeDepts, setActiveDepts] = useState<{ id: string; name: string }[]>([]);
@@ -111,7 +123,7 @@ export default function PhotoCapture() {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraRotationOffset, setCameraRotationOffset] = useState<0 | 270>(0);
+  const [cameraRotationOffset, setCameraRotationOffset] = useState<number>(0);
 
   // Continuous capture local list
   const [localCapturedImages, setLocalCapturedImages] = useState<{ file: File; preview: string; id: string }[]>([]);
@@ -1427,6 +1439,14 @@ export default function PhotoCapture() {
   };
 
   const handleUpload = async () => {
+    let currentStage = 'validate_form';
+    
+    // Check network connectivity first
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      setError('Thiết bị đang mất kết nối mạng. Vui lòng kiểm tra kết nối internet rồi thử lại.');
+      return;
+    }
+
     if (!plate) {
       setError('Vui lòng nhập biển số xe');
       return;
@@ -1436,31 +1456,61 @@ export default function PhotoCapture() {
       return;
     }
 
+    if (uploading) return; // Prevent concurrent duplicate submissions
+
     setUploading(true);
     setProgress(0);
     setError('');
 
+    const uploadUrls: string[] = [];
+    const uploadPaths: string[] = [];
+    const totalSteps = images.length;
+
     try {
-      const uploadUrls: string[] = [];
-      const uploadPaths: string[] = [];
-      const totalSteps = images.length;
+      currentStage = 'prepare_images';
+      console.log(`[handleUpload] Starting upload for plate: ${plate} with ${images.length} images.`);
 
       for (let i = 0; i < images.length; i++) {
         const item = images[i];
+        let fileToUpload: File | Blob = item.file;
 
         // 1. Compression
-        const options = {
-          maxSizeMB: 1,
-          maxWidthOrHeight: 1000,
-          useWebWorker: true,
-          initialQuality: 0.65
-        };
-        const compressedFile = await imageCompression(item.file, options);
+        currentStage = 'compress_image';
+        try {
+          const options = {
+            maxSizeMB: 1,
+            maxWidthOrHeight: 1000,
+            useWebWorker: true,
+            initialQuality: 0.65
+          };
+          fileToUpload = await imageCompression(item.file, options);
+        } catch (compressErr: any) {
+          console.warn(`[handleUpload] Compression failed for image index ${i}, falling back to original file`, compressErr);
+          
+          // Log compression failure warning silently
+          await logClientError('compress_image_warning', compressErr, {
+            source: 'PhotoCapture.normal_upload',
+            fileName: item.file.name,
+            fileSize: item.file.size,
+            fileType: item.file.type,
+            index: i,
+            totalImages: images.length
+          });
+
+          // Safeguard: Check if the original image size exceeds reasonable upload limits
+          const MAX_SIZE_LIMIT = 15 * 1024 * 1024; // 15MB
+          if (item.file.size > MAX_SIZE_LIMIT) {
+            throw new Error(`Ảnh thứ ${i + 1} quá lớn (${(item.file.size / (1024 * 1024)).toFixed(1)}MB) và không thể nén được trên thiết bị này. Vui lòng chụp ảnh độ phân giải thấp hơn hoặc thử lại trên máy tính.`);
+          }
+
+          fileToUpload = item.file;
+        }
 
         // 2. Storage Upload
+        currentStage = 'upload_storage';
         const storagePath = `car-images/${plate.toUpperCase().replace(/[^A-Z0-9]/g, '')}/${Date.now()}-${item.id}.jpg`;
         const storageRef = ref(storage, storagePath);
-        const uploadTask = uploadBytesResumable(storageRef, compressedFile);
+        const uploadTask = uploadBytesResumable(storageRef, fileToUpload);
 
         await new Promise((resolve, reject) => {
           uploadTask.on('state_changed',
@@ -1473,6 +1523,7 @@ export default function PhotoCapture() {
             },
             async () => {
               try {
+                currentStage = 'get_download_url';
                 const url = await getDownloadURL(uploadTask.snapshot.ref);
                 uploadUrls.push(url);
                 uploadPaths.push(storagePath);
@@ -1486,6 +1537,7 @@ export default function PhotoCapture() {
       }
 
       // 3. Firestore entry
+      currentStage = 'create_firestore_session';
       const searchFields = getSearchFields(plate, ro);
       await addDoc(collection(db, 'cars'), {
         plateNumber: plate.toUpperCase(),
@@ -1509,7 +1561,8 @@ export default function PhotoCapture() {
         ...searchFields
       });
 
-      // Clear form inputs immediately on success
+      // 4. Success cleanup
+      currentStage = 'reset_form_after_success';
       setPlate('');
       setRo('');
       setNote('');
@@ -1518,8 +1571,29 @@ export default function PhotoCapture() {
 
       setSuccess(true);
     } catch (err: any) {
-      console.error(err);
-      setError('Lỗi khi upload: ' + err.message);
+      console.error(`[handleUpload] Crash at stage [${currentStage}]:`, err);
+
+      let friendlyMessage = 'Chưa thể tải ảnh lên trên thiết bị này. Vui lòng kiểm tra mạng, thử lại bằng Chrome mới nhất hoặc chụp ít ảnh hơn.';
+      
+      const compInfo = getBrowserCompatibilityInfo();
+      if (compInfo.isLikelyInAppBrowser || compInfo.isLikelyAndroidWebView || compInfo.isLikelyIOSWebView) {
+        friendlyMessage += '\n\nTrình duyệt hiện tại có thể không tương thích tốt. Vui lòng mở bằng Chrome hoặc cập nhật Android System WebView.';
+      }
+      
+      setError(friendlyMessage);
+
+      // Log the exact error and current stage to Firestore
+      await logClientError(currentStage, err, {
+        source: 'PhotoCapture.normal_upload',
+        imageCount: images.length,
+        plate,
+        ro,
+        imageDetails: images.map(img => ({
+          size: img.file.size,
+          type: img.file.type,
+          name: img.file.name
+        }))
+      });
     } finally {
       setUploading(false);
       setProgress(0);
@@ -1581,6 +1655,20 @@ export default function PhotoCapture() {
           </h2>
           <p className="text-xs text-gray-500 mt-1 italic font-medium">Quản lý ảnh xe dịch vụ theo từng phiên chụp</p>
         </div>
+
+        {browserWarnings.length > 0 && (
+          <div className="mx-6 mt-4 p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2.5 animate-fade-in text-left">
+            <span className="text-amber-500 text-sm mt-0.5">⚠️</span>
+            <div className="space-y-1">
+              <p className="text-[10px] text-amber-800 font-extrabold uppercase tracking-wide">Lưu ý Trình duyệt</p>
+              {browserWarnings.map((warning, idx) => (
+                <p key={idx} className="text-[10px] text-amber-700 font-bold leading-normal">
+                  • {warning}
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="p-6 space-y-6">
           <div className="grid grid-cols-2 gap-4">

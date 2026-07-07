@@ -2,8 +2,8 @@ import { Camera, Calendar, Search } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 
 interface TabBarProps {
-  activeTab: 'capture' | 'today' | 'search';
-  onTabChange: (tab: 'capture' | 'today' | 'search') => void;
+  activeTab: 'capture' | 'today' | 'search' | 'settings';
+  onTabChange: (tab: 'capture' | 'today' | 'search' | 'settings') => void;
 }
 
 export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
