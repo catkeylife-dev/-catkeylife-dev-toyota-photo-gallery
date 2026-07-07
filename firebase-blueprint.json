@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Session": {
+      "title": "Photo Session",
+      "description": "A service car photo session",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "plateNumber": { "type": "string" },
+        "roNumber": { "type": "string" },
+        "note": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "imageCount": { "type": "number" },
+        "thumbnailUrl": { "type": "string" },
+        "imageUrls": { "type": "array" },
+        "status": { "type": "string" },
+        "department": { "type": "string" }
+      },
+      "required": ["plateNumber", "createdAt", "imageCount", "thumbnailUrl", "imageUrls"]
+    },
+    "User": {
+      "title": "User Account",
+      "description": "Managed account for technician or admin",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string" },
+        "department": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "canDeleteSession": { "type": "boolean" }
+      },
+      "required": ["email", "displayName", "role", "isActive"]
+    },
+    "Department": {
+      "title": "Dealership Department",
+      "description": "Valid car photo service department",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["name", "isActive"]
+    },
+    "SystemSetting": {
+      "title": "System Configuration",
+      "description": "Internal administrative settings metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "completedAt": { "type": "number" },
+        "processedCount": { "type": "number" }
+      }
+    }
+  },
+  "firestore": {
+    "/cars/{carId}": {
+      "schema": "Session",
+      "description": "Stores photo sessions for service cars"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Stores technician profiles and permissions"
+    },
+    "/departments/{deptId}": {
+      "schema": "Department",
+      "description": "Toyota service department configurations"
+    },
+    "/systemSettings/{settingId}": {
+      "schema": "SystemSetting",
+      "description": "General system configuration properties"
+    }
+  }
+}

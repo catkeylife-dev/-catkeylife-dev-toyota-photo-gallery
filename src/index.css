@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --color-toyota-red: #EB0A1E;
+  --color-toyota-navy: #002C5F;
+  --color-app-bg: #F3F4F6;
+}
+
+@layer base {
+  body {
+    -webkit-tap-highlight-color: transparent;
+    background-color: var(--color-app-bg);
+  }
+}
+
+.scroller::-webkit-scrollbar {
+  width: 4px;
+}
+
+.scroller::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scroller::-webkit-scrollbar-thumb {
+  background: rgba(0, 44, 95, 0.1);
+  border-radius: 10px;
+}
+
+.scroller::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 44, 95, 0.2);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}

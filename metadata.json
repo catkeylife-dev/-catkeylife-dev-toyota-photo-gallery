@@ -1,0 +1,10 @@
+{
+  "name": "Ảnh Xe THD - Share Test ",
+  "description": "Quản lý ảnh xe dịch vụ theo từng phiên chụp cho Toyota Hà Đông",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global catch-all deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSameDepartment(sessionDept, userDept) {
+      return sessionDept == userDept || (
+        (sessionDept == 'insurance' && (userDept == 'baohiem' || userDept == 'bao-hiem')) ||
+        ((sessionDept == 'baohiem' || sessionDept == 'bao-hiem') && userDept == 'insurance') ||
+        (sessionDept == 'service' && (userDept == 'dichvu' || userDept == 'dich-vu')) ||
+        ((sessionDept == 'dichvu' || sessionDept == 'dich-vu') && userDept == 'service')
+      );
+    }
+
+    // Session validation
+    function isValidSession(data) {
+      return data.plateNumber is string && data.plateNumber.size() > 0 && data.plateNumber.size() <= 20
+        && data.createdAt is number
+        && data.createdAt <= request.time.toMillis() + 300000
+        && data.imageCount is number
+        && (
+          ((!('status' in data) || data.status != 'uploading') && data.imageCount >= 1) ||
+          ('status' in data && data.status == 'uploading' && data.imageCount >= 0)
+        )
+        && data.imageUrls is list 
+        && data.imageUrls.size() <= 15
+        && data.imageUrls.size() == data.imageCount
+        && (data.imageCount == 0 || data.imageUrls[0].startsWith('https://firebasestorage.googleapis.com/'))
+        && data.thumbnailUrl is string
+        && (data.thumbnailUrl == "" || data.thumbnailUrl.startsWith('https://firebasestorage.googleapis.com/'))
+        && (!('note' in data) || (data.note is string && data.note.size() <= 2000 && !data.note.matches('.*<[^>]+>.*')))
+        && (!('department' in data) || (data.department is string));
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && (request.auth.uid == userId || request.auth.token.email == "cat.keylife@gmail.com" || getUserData().role == "admin");
+    }
+
+    match /departments/{deptId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && getUserData().role == "admin";
+      allow delete: if isSignedIn() && getUserData().role == "admin" && getUserData().isActive == true;
+    }
+
+    match /systemSettings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && getUserData().role == "admin";
+    }
+
+    match /cars/{carId} {
+      allow read: if isSignedIn();
+      
+      allow create: if isSignedIn() 
+        && isValidSession(incoming());
+        
+      allow update: if isSignedIn()
+        && isValidSession(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'note', 'roNumber', 'status', 'thumbnailUrl', 'imageUrls', 'imageCount', 'storagePaths', 'department',
+            'createdByUid', 'createdByEmail', 'createdByName',
+            'updatedByUid', 'updatedByEmail', 'updatedByName', 'updatedAt',
+            'uploadedByUid', 'uploadedByEmail', 'uploadedByName', 'searchKeywords'
+          ])
+        );
+        
+      allow delete: if isSignedIn() && (
+        getUserData().role == 'admin' || (
+          getUserData().canDeleteSession == true &&
+          isSameDepartment(resource.data.department, getUserData().department)
+        ) || (
+          resource.data.status == 'uploading' &&
+          resource.data.createdByUid == request.auth.uid
+        )
+      );
+
+      match /images/{imageId} {
+        allow read, create, update: if isSignedIn();
+        allow delete: if isSignedIn() && (
+          getUserData().role == 'admin' || (
+            getUserData().canDeleteSession == true &&
+            isSameDepartment(get(/databases/$(database)/documents/cars/$(carId)).data.department, getUserData().department)
+          )
+        );
+      }
+    }
+  }
+}
